@@ -71,17 +71,25 @@ export default function PoolTable() {
   const railW = 0.09
   const cushionH = 0.028
 
+  // Static base angle gives the "premium product shot" 3/4 view; mouse and
+  // scroll only ever nudge around this baseline so the table always reads
+  // as an intentionally-composed hero shot, never a flat front-on view.
+  const BASE_ROT_Y = 0.42
+
   useFrame((state) => {
     if (!group.current) return
     const t = state.clock.elapsedTime
     const scroll = progress.current
 
-    const targetRotY = mouse.normalized.x * 0.12 + scroll * 0.4
-    const targetRotX = mouse.normalized.y * 0.04 + Math.sin(t * 0.2) * 0.015
+    const targetRotY = BASE_ROT_Y + mouse.normalized.x * 0.1 + scroll * 0.4
+    const targetRotX = mouse.normalized.y * 0.035 + Math.sin(t * 0.2) * 0.012
 
     group.current.rotation.y += (targetRotY - group.current.rotation.y) * 0.04
     group.current.rotation.x += (targetRotX - group.current.rotation.x) * 0.04
-    
+
+    // Soft floating bob layered on top of the scroll-driven descent.
+    const float = Math.sin(t * 0.6) * 0.035
+    group.current.position.y = -0.3 - scroll * 0.5 + float
   })
 
   const pockets = [
@@ -101,7 +109,7 @@ export default function PoolTable() {
   }
 
   return (
-    <group ref={group} position={[0, 0, 0]}>
+    <group ref={group} position={[0, -0.3, 0]}>
       {/* Cabinet */}
       <mesh position={[0, -0.1, 0]} castShadow receiveShadow>
         <boxGeometry args={[tableW + 0.18, 0.2, tableD + 0.18]} />
