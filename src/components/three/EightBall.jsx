@@ -24,24 +24,35 @@ function createCircleTexture() {
   return tex
 }
 
-export default function EightBall({ position = [-0.4, 0.14, -0.15], interactive = true }) {
+const FELT_Y = 0.095
+
+export default function EightBall({ ballData, onClick }) {
   const ref = useRef()
-  const hovered = useRef(false)
   const circleTex = useMemo(() => createCircleTexture(), [])
 
   useFrame((_, delta) => {
-    if (!ref.current) return
-    ref.current.rotation.y += delta * 0.15
-    const scale = hovered.current ? 1.08 : 1
-    ref.current.scale.lerp(new THREE.Vector3(scale, scale, scale), 0.1)
+    if (!ref.current || !ballData) return
+    const ball = ref.current
+
+    ball.rotation.x += ballData.vel.z * delta * 5
+    ball.rotation.z -= ballData.vel.x * delta * 5
+    ball.rotation.y += delta * 0.15
+
+    ball.position.set(ballData.pos.x, FELT_Y, ballData.pos.z)
   })
 
   return (
-    <group ref={ref} position={position}>
+    <group ref={ref} position={[ballData?.pos.x || -0.35, FELT_Y, ballData?.pos.z || -0.1]}>
       <mesh
         castShadow
-        onPointerOver={interactive ? () => { hovered.current = true } : undefined}
-        onPointerOut={interactive ? () => { hovered.current = false } : undefined}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (ballData) {
+            ballData.vel.x = (Math.random() - 0.5) * 3
+            ballData.vel.z = (Math.random() - 0.5) * 3
+          }
+          onClick?.()
+        }}
       >
         <sphereGeometry args={[0.057, 64, 64]} />
         <meshPhysicalMaterial

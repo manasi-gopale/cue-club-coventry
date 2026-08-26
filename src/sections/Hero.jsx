@@ -1,34 +1,47 @@
-import { useEffect, useRef } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useRef, useState, lazy, Suspense } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import gsap from 'gsap'
-import Scene3D from '../components/three/Scene3D'
 import Button from '../components/ui/Button'
+import ControlToolbar from '../components/ui/ControlToolbar'
+import HUDDrawer from '../components/ui/HUDDrawer'
 import { useMouseParallax } from '../hooks/useMouseParallax'
+import { soundEngine } from '../utils/audio'
 import { CLUB_INFO } from '../utils/constants'
+
+const Scene3D = lazy(() => import('../components/three/Scene3D'))
+
+function Hero3DFallback() {
+  return (
+    <div className="hero__fallback" aria-hidden="true">
+      <div className="hero__fallback-spinner" />
+      <span className="hero__fallback-text">Loading 3D Atmosphere...</span>
+    </div>
+  )
+}
 
 export default function Hero() {
   const rootRef = useRef(null)
   const titleRef = useRef(null)
   const subtitleRef = useRef(null)
   const ctaRef = useRef(null)
-  const scrollRef = useRef(null)
   const visualRef = useRef(null)
 
-  // Subtle cursor-driven drift applied to the inner scene wrapper only,
-  // kept separate from the GSAP-animated outer wrapper so the two never
-  // fight over the same `transform` style property.
+  const [hasInteracted, setHasInteracted] = useState(false)
+  const [cameraMode, setCameraMode] = useState('hero')
+  const [lightingTheme, setLightingTheme] = useState('midnight')
+  const [showPins, setShowPins] = useState(true)
+  const [activePin, setActivePin] = useState(null)
+  const [soundEnabled, setSoundEnabled] = useState(false)
+
   const parallaxRef = useMouseParallax(0.045)
 
   useEffect(() => {
-    // gsap.context scopes selectors + guarantees clean teardown, which
-    // matters once StrictMode double-invokes this effect in dev.
     const ctx = gsap.context(() => {
       const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
 
       tl.from(titleRef.current, { y: 70, opacity: 0, duration: 1.1, delay: 0.25 })
         .from(subtitleRef.current, { y: 32, opacity: 0, duration: 0.8 }, '-=0.65')
         .from(ctaRef.current.children, { y: 24, opacity: 0, duration: 0.6, stagger: 0.1 }, '-=0.45')
-        .from(scrollRef.current, { opacity: 0, duration: 0.7 }, '-=0.2')
         .from(
           visualRef.current,
           { opacity: 0, scale: 0.9, duration: 1.6, ease: 'power2.out' },
@@ -39,6 +52,18 @@ export default function Hero() {
     return () => ctx.revert()
   }, [])
 
+  const handleToggleSound = () => {
+    const newState = soundEngine.toggleSound()
+    setSoundEnabled(newState)
+  }
+
+  const handleResetView = () => {
+    setCameraMode('hero')
+    setLightingTheme('midnight')
+    setActivePin(null)
+    setShowPins(true)
+  }
+
   return (
     <section className="hero" id="hero" ref={rootRef}>
       <div className="hero__bg" aria-hidden="true">
@@ -46,6 +71,9 @@ export default function Hero() {
         <div className="hero__grid" />
         <div className="hero__noise" />
       </div>
+
+      {/* Floating Left Telemetry Panel & Chapter Drawer */}
+      <HUDDrawer activePin={activePin} setActivePin={setActivePin} />
 
       <div className="hero__container container">
         <div className="hero__content">
@@ -83,15 +111,47 @@ export default function Hero() {
         <div ref={visualRef} className="hero__visual">
           <div className="hero__visual-glow" aria-hidden="true" />
           <div className="hero__visual-inner" ref={parallaxRef}>
-            <Scene3D />
+            <Suspense fallback={<Hero3DFallback />}>
+              <Scene3D
+                onCueBallInteract={() => setHasInteracted(true)}
+                cameraMode={cameraMode}
+                lightingTheme={lightingTheme}
+                showPins={showPins}
+                activePin={activePin}
+                setActivePin={setActivePin}
+              />
+            </Suspense>
           </div>
+
+          <AnimatePresence>
+            {!hasInteracted && (
+              <motion.div
+                className="hero__interaction-hint"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ delay: 1.2, duration: 0.5 }}
+              >
+                <span className="hero__interaction-hint-dot" />
+                <span>Drag cue ball to strike 🎱</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
-      <div ref={scrollRef} className="hero__scroll">
-        <span>Scroll</span>
-        <div className="hero__scroll-line" />
-      </div>
+      {/* Floating Bottom Control Bar */}
+      <ControlToolbar
+        cameraMode={cameraMode}
+        setCameraMode={setCameraMode}
+        lightingTheme={lightingTheme}
+        setLightingTheme={setLightingTheme}
+        showPins={showPins}
+        setShowPins={setShowPins}
+        soundEnabled={soundEnabled}
+        toggleSound={handleToggleSound}
+        onResetView={handleResetView}
+      />
     </section>
   )
 }

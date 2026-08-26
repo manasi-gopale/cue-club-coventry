@@ -1,68 +1,168 @@
-import { useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useRef, useState } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
-export default function CueBall({ position = [0, 0.14, 0], interactive = true, onClick }) {
-  const ref = useRef()
-  const velocity = useRef({ x: 0, z: 0 })
-  const hovered = useRef(false)
+const FELT_Y = 0.095
+const BOUNDS = { x: 1.14, z: 0.52 }
+const BALL_RADIUS = 0.057
 
-  useFrame((state, delta) => {
-    if (!ref.current) return
-    const ball = ref.current
+export default function CueBall({
+  ballData,
+  onInteract,
+}) {
+  const meshRef = useRef()
+  const [isDragging, setIsDragging] = useState(false)
+  const [hovered, setHovered] = useState(false)
+  const dragStart = useRef(new THREE.Vector3())
+  const dragCurrent = useRef(new THREE.Vector3())
+  const aimVector = useRef(new THREE.Vector3())
 
-    velocity.current.x *= 0.98
-    velocity.current.z *= 0.98
+  const { raycaster, camera, gl } = useThree()
+  const plane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), -FELT_Y)).current
+  const planeIntersect = useRef(new THREE.Vector3())
 
-    ball.position.x += velocity.current.x * delta
-    ball.position.z += velocity.current.z * delta
-
-    const bounds = { x: 1.5, z: 0.65 }
-    if (Math.abs(ball.position.x) > bounds.x) {
-      ball.position.x = Math.sign(ball.position.x) * bounds.x
-      velocity.current.x *= -0.7
-    }
-    if (Math.abs(ball.position.z) > bounds.z) {
-      ball.position.z = Math.sign(ball.position.z) * bounds.z
-      velocity.current.z *= -0.7
-    }
-
-    ball.rotation.x += (velocity.current.z * 3 + 0.2) * delta
-    ball.rotation.z -= (velocity.current.x * 3) * delta
-
-    if (hovered.current) {
-      ball.scale.lerp(new THREE.Vector3(1.08, 1.08, 1.08), 0.1)
-    } else {
-      ball.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1)
-    }
-  })
-
-  const handleClick = (e) => {
-    e.stopPropagation()
-    velocity.current.x = (Math.random() - 0.5) * 4
-    velocity.current.z = (Math.random() - 0.5) * 4
-    onClick?.()
+  const getPlanePoint = (e) => {
+    const rect = gl.domElement.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+    const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+    raycaster.setFromCamera({ x, y }, camera)
+    raycaster.ray.intersectPlane(plane, planeIntersect)
+    return planeIntersect.clone()
   }
 
+  useFrame((state, delta) => {
+    if (!meshRef.current || !ballData) return
+    const ball = meshRef.current
+
+    if (isDragging) {
+      aimVector.current.subVectors(dragStart.current, dragCurrent.current)
+      if (aimVector.current.length() > 0.8) {
+        aimVector.current.normalize().multiplyScalar(0.8)
+      }
+    } else {
+      // Rotation based on movement
+      ball.rotation.x += ballData.vel.z * delta * 5
+      ball.rotation.z -= ballData.vel.x * delta * 5
+    }
+
+    ball.position.set(ballData.pos.x, FELT_Y, ballData.pos.z)
+
+    const targetScale = isDragging ? 1.18 : hovered ? 1.1 : 1
+    ball.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.15)
+  })
+
+  const handlePointerDown = (e) => {
+    e.stopPropagation()
+    onInteract?.()
+    try {
+      e.target.setPointerCapture(e.pointerId)
+    } catch (_) {}
+
+    const pt = getPlanePoint(e)
+    dragStart.current.set(ballData.pos.x, FELT_Y, ballData.pos.z)
+    dragCurrent.current.copy(pt)
+    setIsDragging(true)
+    document.body.style.cursor = 'grabbing'
+  }
+
+  const handlePointerMove = (e) => {
+    if (!isDragging) return
+    e.stopPropagation()
+    const pt = getPlanePoint(e)
+    dragCurrent.current.copy(pt)
+  }
+
+  const handlePointerUp = (e) => {
+    if (!isDragging) return
+    e.stopPropagation()
+    try {
+      e.target.releasePointerCapture(e.pointerId)
+    } catch (_) {}
+
+    setIsDragging(false)
+    document.body.style.cursor = hovered ? 'pointer' : ''
+
+    const pullDist = aimVector.current.length()
+    if (pullDist > 0.03) {
+      const force = pullDist * 7.5
+      const dir = aimVector.current.clone().normalize()
+      ballData.vel.x = dir.x * force
+      ballData.vel.z = dir.z * force
+    } else {
+      // Single click/tap default strike towards table center/rack
+      ballData.vel.x = -2.5
+      ballData.vel.z = (Math.random() - 0.5) * 1.5
+    }
+  }
+
+  const aimLength = isDragging ? aimVector.current.length() * 3 : 0
+  const aimEnd = isDragging
+    ? new THREE.Vector3(
+        ballData.pos.x + aimVector.current.x * 3,
+        FELT_Y,
+        ballData.pos.z + aimVector.current.z * 3
+      )
+    : new THREE.Vector3()
+
   return (
-    <group ref={ref} position={position}>
+    <group>
+      {/* Cue Ball Sphere */}
       <mesh
+        ref={meshRef}
         castShadow
-        onClick={interactive ? handleClick : undefined}
-        onPointerOver={interactive ? () => { hovered.current = true; document.body.style.cursor = 'pointer' } : undefined}
-        onPointerOut={interactive ? () => { hovered.current = false; document.body.style.cursor = '' } : undefined}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerOver={() => {
+          setHovered(true)
+          document.body.style.cursor = 'pointer'
+        }}
+        onPointerOut={() => {
+          setHovered(false)
+          if (!isDragging) document.body.style.cursor = ''
+        }}
       >
-        <sphereGeometry args={[0.057, 64, 64]} />
+        <sphereGeometry args={[BALL_RADIUS, 64, 64]} />
         <meshPhysicalMaterial
-          color="#fafaf5"
-          roughness={0.04}
+          color="#ffffff"
+          roughness={0.03}
           metalness={0.05}
           clearcoat={1}
           clearcoatRoughness={0.02}
-          envMapIntensity={2}
-          reflectivity={1}
+          envMapIntensity={2.2}
         />
       </mesh>
+
+      {/* Ring visual indicator beneath cue ball */}
+      {ballData && (
+        <mesh
+          position={[ballData.pos.x, FELT_Y - 0.035, ballData.pos.z]}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <ringGeometry args={[0.07, 0.085, 32]} />
+          <meshBasicMaterial
+            color={isDragging ? '#4ade80' : '#c9a96e'}
+            transparent
+            opacity={isDragging ? 0.9 : hovered ? 0.75 : 0.4}
+          />
+        </mesh>
+      )}
+
+      {/* Trajectory Aim Line while dragging */}
+      {isDragging && aimLength > 0.05 && (
+        <line>
+          <bufferGeometry
+            attach="geometry"
+            onUpdate={(self) => {
+              self.setFromPoints([
+                new THREE.Vector3(ballData.pos.x, FELT_Y + 0.005, ballData.pos.z),
+                aimEnd,
+              ])
+            }}
+          />
+          <lineBasicMaterial attach="material" color="#4ade80" linewidth={3} />
+        </line>
+      )}
     </group>
   )
 }
